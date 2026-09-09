@@ -2,12 +2,14 @@ package backend.independent_consumer_task.consumer;
 
 
 import backend.independent_consumer_task.annotations.IdempotentPayout;
+import backend.independent_consumer_task.annotations.LogExecuteTimer;
 import backend.independent_consumer_task.configs.PayoutRabbitConfig;
 import backend.independent_consumer_task.dto.PayoutRequestedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Service;
+import java.util.concurrent.TimeUnit;
 
 
 @Service
@@ -17,7 +19,9 @@ public class PayoutEventConsumer {
 
 
 
-    @IdempotentPayout(key = "#payoutRequestedEvent.payoutId", timeUnit = java.util.concurrent.TimeUnit.HOURS)
+
+    @IdempotentPayout(key = "#payoutRequestedEvent.payoutId", timeUnit = TimeUnit.MINUTES)
+    @LogExecuteTimer
     @RabbitListener(queues = PayoutRabbitConfig.PAYOUT_QUEUE)
     public void consumePayoutEvent(PayoutRequestedEvent payoutRequestedEvent) {
         log.info("Received payout event with payoutId: {} and userId: {}",

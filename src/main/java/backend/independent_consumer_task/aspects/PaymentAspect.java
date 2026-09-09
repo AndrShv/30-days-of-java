@@ -1,6 +1,4 @@
 package backend.independent_consumer_task.aspects;
-
-
 import backend.independent_consumer_task.annotations.IdempotentPayout;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,6 +6,7 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
+import org.springframework.core.annotation.Order;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.ExpressionParser;
@@ -20,6 +19,7 @@ import java.lang.reflect.Method;
 @Aspect
 @Component
 @Slf4j
+@Order(1)
 @RequiredArgsConstructor
 public class PaymentAspect {
     private final StringRedisTemplate redisTemplate;
@@ -27,7 +27,7 @@ public class PaymentAspect {
 
 
     @Around("@annotation(idempotentPayout)")
-    public Object handleIdempotency(ProceedingJoinPoint joinPoint, IdempotentPayout idempotentPayout) throws Throwable {
+    public Object checkoutForDuplicatePayment(ProceedingJoinPoint joinPoint, IdempotentPayout idempotentPayout) throws Throwable {
         String payoutKey = idempotentPayout.key();
         String payoutId = parsePayoutKey(payoutKey, joinPoint);
         String redisKey = "payout:" + payoutId;

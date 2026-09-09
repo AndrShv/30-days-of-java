@@ -1,0 +1,30 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: idempotent-consumer-service
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        retry:
+          enabled: true
+          max-attempts: 3         # 3 попытки перед отправкой в DLQ
+          initial-interval: 1000ms # Пауза 1 секунда
+          multiplier: 2.0         # Экспоненциальное увеличение (1s, 2s, 4s)
+
+logging:
+  level:
+    root: INFO
+    com.example.idempotentconsumer: DEBUG

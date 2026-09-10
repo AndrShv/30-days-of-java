@@ -3,8 +3,7 @@ import backend.transactional_outbox_pattern_task.entity.OutboxEventEntity;
 import backend.transactional_outbox_pattern_task.enums.EventStatus;
 import backend.transactional_outbox_pattern_task.repo.OutboxRepository;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -15,11 +14,11 @@ import java.util.List;
 
 
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class OrderEventProducer {
 
-    private static final Logger log = LoggerFactory.getLogger(OrderEventProducer.class);
     private final RabbitTemplate rabbitTemplate;
     private final OutboxRepository outboxRepository;
 
@@ -33,18 +32,24 @@ public class OrderEventProducer {
     @Transactional
     @Scheduled(fixedDelayString = "${outbox.scheduler.fixed-delay-ms:3000}")
     public void processOrderEvent() {
+        log.info("Processing order events");
         List<OutboxEventEntity> pendingEvents = outboxRepository.findTop10ByStatusOrderByCreatedAtAsc(EventStatus.PENDING);
         if (pendingEvents.isEmpty()) {
+            log.info("No pending events found");
             return;
         }
         for (OutboxEventEntity event : pendingEvents) {
             try {
-                rabbitTemplate.convertAndSend(exchange, routingKey, event);
+                log.info("Sending event to RabbitMQ: {}", event.getPayload());
+                rabbitTemplate.convertAndSend(exchange, routingKey, event.getPayload());
                 event.setStatus(EventStatus.PROCESSED);
+                log.info("Event sent to RabbitMQ: {}", event.getPayload());
                 outboxRepository.save(event);
+                log.info("Event saved to database: {}", event.getPayload());
             } catch (Exception e) {
                 log.error("Error sending event to RabbitMQ: {}", e.getMessage());
                 event.setStatus(EventStatus.FAILED);
+                log.error("Event failed to send to RabbitMQ: {}", event.getPayload());
                 outboxRepository.save(event);
             }
         }

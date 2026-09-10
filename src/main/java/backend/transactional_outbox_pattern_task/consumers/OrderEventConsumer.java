@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 public class OrderEventConsumer {
     private final ObjectMapper objectMapper;
 
-    @RabbitListener(queues = "order-events")
+    @RabbitListener(queues = "${order.rabbitmq.queue:order_outbox_queue}")
     public void consumeOrderEvent(String message) {
         try {
             OrderEvent event = objectMapper.readValue(message, OrderEvent.class);

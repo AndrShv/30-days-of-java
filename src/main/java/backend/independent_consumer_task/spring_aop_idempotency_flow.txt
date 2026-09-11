@@ -1,0 +1,92 @@
+================================================================================
+          SPRING AOP & IDEMPOTENCY: FLOW & ASPECT MATCHING GUIDE
+                (Проект: backend.independent_consumer_task)
+================================================================================
+
+1. ОБЩИЙ FLOW (ЖИЗНЕННЫЙ ЦИКЛ СООБЩЕНИЯ В ТВОЕМ ПРОЕКТЕ)
+--------------------------------------------------------------------------------
+[ PayoutController / RestTemplate ]
+        │
+        │ 1. Принимает запрос и отправляет PayoutRequestedEvent в RabbitMQ
+        ▼
+[ RabbitMQ / Очередь payouts.queue ]
+        │
+        │ 2. Консьюмер (PayoutConsumer / PayoutListener) вычитывает ивент из очереди
+        ▼
+[ Spring AOP Proxy (Шлагбаум) ]
+        │
+        ├──► 3. Spring перехватывает вызов, так как над консьюмером висит @IdempotentPayout
+        │
+        ├──► 4. Переход в PaymentAspect.checkoutForDuplicatePayment(...)
+        │       │
+        │       ├──► 4.1. parsePayoutKey(): Парсит выражение "#payoutRequestedEvent.payoutId"
+        │       │        и вытаскивает реальный ID (например, "1111-2222") из аргументов.
+        │       │
+        │       ├──► 4.2. redisTemplate.opsForValue().setIfAbsent("payout:1111-2222", "IN_PROGRESS", TTL):
+        │       │        │
+        │       │        ├── [ ВЫЗОВ №1 (isFirstPayment = true) ]
+        │       │        │   • Ключ в Redis создан со статусом IN_PROGRESS.
+        │       │        │   • Аспект вызывает joinPoint.proceed() -> Запускается метод консьюмера.
+        │       │        │   • При успешном выполнении -> статус меняется на COMPLETED.
+        │       │        │   • При ошибке (Exception) -> ключ удаляется из Redis для работы Spring Retry.
+        │       │        │
+        │       │        └── [ ВЫЗОВ №2 - ДУБЛИКАТ (isFirstPayment = false) ]
+        │       │            • Ключ "payout:1111-2222" УЖЕ есть в Redis.
+        │       │            • Аспект пишет log.warn("Payout with id ... is already processed").
+        │       │            • Делает return null — метод консьюмера ВООБЩЕ НЕ ВЫЗЫВАЕТСЯ.
+        │
+        ▼
+[ Метод Консьюмера (например, processPayout / consumePayout) ]
+        (Выполняется ТОЛЬКО если аспект разрешил проведение операции)
+
+
+================================================================================
+2. КАК SPRING ПОНИМАЕТ, КАКОЙ ИМЕННО АСПЕКТ И МЕТОД ВЫЗВАТЬ?
+--------------------------------------------------------------------------------
+Spring связывает аннотацию над методом с методом аспекта НЕ по имени метода,
+а по строгому соответствию ТИПОВ в сигнатуре:
+
+Шаг A: В классе PaymentAspect объявлена точка среза (Pointcut):
+       @Around("@annotation(idempotentPayout)")
+       public Object checkoutForDuplicatePayment(ProceedingJoinPoint joinPoint, IdempotentPayout idempotentPayout)
+
+Шаг B: Связка работает по цепочке имен и типов:
+       1. В @Around("@annotation(idempotentPayout)") указано имя переменной: "idempotentPayout".
+       2. Spring ищет среди параметров метода checkoutForDuplicatePayment переменную с именем "idempotentPayout".
+       3. Находит параметр: "IdempotentPayout idempotentPayout".
+       4. Из ТИПА параметра (IdempotentPayout) Spring понимает, что нужно перехватывать
+          все методы в приложении, помеченные аннотацией @IdempotentPayout.
+
+Шаг C: При вызове метода консьюмера в твоем коде:
+       @RabbitListener(queues = "...")
+       @IdempotentPayout(key = "#payoutRequestedEvent.payoutId", timeUnit = TimeUnit.HOURS)
+       public void consumePayout(PayoutRequestedEvent payoutRequestedEvent)
+
+       1. Spring видит аннотацию @IdempotentPayout над методом консьюмера.
+       2. Перехватывает вызов и передает управление в PaymentAspect.checkoutForDuplicatePayment.
+       3. Передает сам объект аннотации (со значениями key, timeUnit и т.д.)
+          прямо в параметр "idempotentPayout" метода аспекта.
+
+
+================================================================================
+3. ЧТО ЕСЛИ НАД МЕТОДОМ ВИСИТ НЕСКОЛЬКО АСПЕКТОВ?
+--------------------------------------------------------------------------------
+Если над методом стоит несколько аннотаций (например, @IdempotentPayout,
+@Transactional), Spring выстраивает из них цепочку (Aspect Chain):
+
+     Входящее сообщение из RabbitMQ
+                   │
+                   ▼
+   [ PaymentAspect: @Order(1) ] --------> Проверка Redis (Идемпотентность)
+                   │
+                   │ joinPoint.proceed()
+                   ▼
+   [ TransactionAspect: @Order(2) ] ----> Открытие DB транзакции
+                   │
+                   │ joinPoint.proceed()
+                   ▼
+   [ Метод Консьюмера ] ----------------> Выполнение бизнес-логики выплаты
+
+Управлять порядком выполнения нескольких аспектов можно с помощью аннотации @Order(N)
+над классом аспекта (чем МЕНЬШЕ число, тем РАНЬШЕ сработает аспект при входе).
+================================================================================

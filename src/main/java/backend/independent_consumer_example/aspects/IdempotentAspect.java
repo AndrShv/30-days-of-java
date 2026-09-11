@@ -1,6 +1,6 @@
 package backend.independent_consumer_example.aspects;
 
-import backend.independent_consumer_example.anotations.Idempotent;
+import backend.independent_consumer_example.annotations.Idempotent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;

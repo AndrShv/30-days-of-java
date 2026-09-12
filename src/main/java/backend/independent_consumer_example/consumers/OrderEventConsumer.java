@@ -1,6 +1,6 @@
 package backend.independent_consumer_example.consumers;
 
-import backend.independent_consumer_example.anotations.Idempotent;
+import backend.independent_consumer_example.annotations.Idempotent;
 import backend.independent_consumer_example.configs.RabbitMqConfig;
 import backend.independent_consumer_example.dto.OrderCreatedEvent;
 import lombok.extern.slf4j.Slf4j;

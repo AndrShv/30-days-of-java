@@ -3,7 +3,7 @@ package backend.patterns;
 import lombok.*;
 
 public class Strategy {
-    Payment card_payment = new CashPayment();
+    Payment card_payment = new CardPayment();
     Payment cash_payment = new CashPayment();
 
     public static void main(String[] args) {
@@ -30,7 +30,6 @@ abstract class Payment{
 
 @Data
 @AllArgsConstructor
-@NoArgsConstructor
 @EqualsAndHashCode(callSuper = true)
 class CardPayment extends Payment{
 
@@ -41,7 +40,6 @@ class CardPayment extends Payment{
 }
 @Data
 @AllArgsConstructor
-@NoArgsConstructor
 @EqualsAndHashCode(callSuper = true)
 class CashPayment extends Payment{
 

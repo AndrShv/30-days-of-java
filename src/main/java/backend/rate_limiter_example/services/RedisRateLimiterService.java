@@ -47,6 +47,6 @@ public class RedisRateLimiterService {
                 String.valueOf(windowInSeconds)
         );
 
-        return result != null && result == 1L;
+        return result == 1L;
     }
 }

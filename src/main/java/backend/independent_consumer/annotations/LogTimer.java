@@ -12,8 +12,4 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 @Order(2)
 public @interface LogTimer {
-    String startTime();
-    String endTime();
-    String duration();
-
 }

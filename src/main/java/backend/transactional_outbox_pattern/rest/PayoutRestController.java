@@ -1,7 +1,7 @@
 package backend.transactional_outbox_pattern.rest;
 
 
-import backend.independent_consumer_task.dto.PayoutRequestDto;
+import backend.transactional_outbox_pattern.dto.PayoutRequestDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

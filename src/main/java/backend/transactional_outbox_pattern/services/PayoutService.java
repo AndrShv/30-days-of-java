@@ -1,6 +1,6 @@
 package backend.transactional_outbox_pattern.services;
 
-import backend.independent_consumer_task.dto.PayoutRequestDto;
+import backend.transactional_outbox_pattern.dto.PayoutRequestDto;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;

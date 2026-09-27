@@ -1,4 +1,4 @@
-package backend.independent_consumer_task.dto;
+package backend.transactional_outbox_pattern.dto;
 
 
 import lombok.AllArgsConstructor;

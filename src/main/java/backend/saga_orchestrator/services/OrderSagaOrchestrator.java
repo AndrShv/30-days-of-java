@@ -73,36 +73,25 @@ public class OrderSagaOrchestrator {
 
 
     private void rollbackSaga(Order order) {
-        OrderStatus currentStatus = order.getStatus();
-        // 1. Сначала отменяем ДОСТАВКУ (так как она была забронирована последней)
-        if (currentStatus == OrderStatus.DELIVERY_RESERVED) {
-            updateStatus(order, OrderStatus.CANCELING_DELIVERY); // Переводим статус в CANCELING_DELIVERY
-            try {
-                deliveryService.cancelDelivery(order.getOrderId());
-            } catch (Exception ex) {
-                log.error("💥 Не удалось отменить доставку! Требуется ручное вмешательство.", ex);
-            }
-        }
+        OrderStatus failedAtState = order.getStatus();
 
-        // 2. Затем отменяем ОПЛАТУ (если оплата успела пройти)
-        // Обрати внимание: если мы на шаге 1 отменяли доставку, в памяти у объекта order статус поменялся на CANCELING_DELIVERY,
-        // поэтому проверяем и исходный currentStatus, и текущий контекст:
-        if (currentStatus == OrderStatus.PAYMENT_PROCESSED || currentStatus == OrderStatus.DELIVERY_RESERVED) {
+        if (failedAtState == OrderStatus.DELIVERY_RESERVED) {
+            // Упали ПОСЛЕ доставки -> Отменяем доставку, ПОТОМ оплату
+            updateStatus(order, OrderStatus.CANCELING_DELIVERY);
+            deliveryService.cancelDelivery(order.getOrderId());
+
             updateStatus(order, OrderStatus.CANCELING_PAYMENT);
-            try {
-                paymentService.refundPayment(order.getOrderId(), order.getAmount());
-            } catch (Exception ex) {
-                log.error("💥 Не удалось отменить оплату! Требуется ручное вмешательство.", ex);
-            }
+            paymentService.refundPayment(order.getOrderId(), order.getAmount());
+
+        } else if (failedAtState == OrderStatus.PAYMENT_PROCESSED) {
+            // Упали ВО ВРЕМЯ доставки -> Доставку отменять не надо, отменяем ТОЛЬКО оплату
+            updateStatus(order, OrderStatus.CANCELING_PAYMENT);
+            paymentService.refundPayment(order.getOrderId(), order.getAmount());
         }
 
-        // 3. Завершаем откат самого заказа
+        // В любом случае отменяем заказ
         updateStatus(order, OrderStatus.CANCELING_ORDER);
-        log.warn("🔄 [Order Service COMPENSATE] Статус заказа {} изменен на REJECTED", order.getOrderId());
-
-        // Финальный статус саги после всех откатов
         updateStatus(order, OrderStatus.COMPENSATED);
-        log.info("🛡️ [Saga: {}] Компенсирующие транзакции успешно завершены.", order.getSagaId());
     }
     private void updateStatus(Order order, OrderStatus newStatus) {
         order.setStatus(newStatus);

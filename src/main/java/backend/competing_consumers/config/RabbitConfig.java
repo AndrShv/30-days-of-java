@@ -30,7 +30,7 @@ public class RabbitConfig {
         factory.setMessageConverter(jsonMessageConverter()); // <- Подключаем JSON
         // 1. Устанавливаем количество параллельных потоков-консьюмеров внутри ОДНОГО приложения
         factory.setConcurrentConsumers(3); // 3 воркера под капотом
-        factory.setMaxConcurrentConsumers(5);
+        factory.setMaxConcurrentConsumers(5); // 5 воркеров максимум, если нагрузка возрастет
         // 2. КЛЮЧЕВОЙ ПАРАМЕТР SYSTEM DESIGN: FAIR DISPATCH
         // Каждый воркер берет строго по 1 задаче за раз.
         // Следующую получит только после отправки ACK за предыдущую.

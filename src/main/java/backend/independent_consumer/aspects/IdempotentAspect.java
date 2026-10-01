@@ -36,16 +36,36 @@ public class IdempotentAspect {
         String transactionId = parseSpelKey(idempotent.key(), joinPoint);
         String redisKey = "idempotency:bank-tx:" + transactionId;
 
+        /*
+         * ШАГ 1: Попытка "забронировать" обработку транзакции
+         * -------------------------------------------------------------------------------------
+         * setIfAbsent — это атомарная команда Redis "SETNX" (Set if Not Exists).
+         * Поведение:
+         *   - Если ключа в Redis НЕТ -> создает его со значением "IN_PROGRESS" и возвращает true.
+         *   - Если ключ УЖЕ ЕСТЬ -> ничего не делает и возвращает false.
+         *
+         * lockTimeoutSeconds (60 сек) — страховка от падения приложения.
+         * Если сервис сдохнет прямо во время списывания денег, Redis сам удалит ключ через 60 сек,
+         * и повторная попытка (Retry) не заблокируется навечно.
+         */
         Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
                 redisKey,
                 STATE_IN_PROGRESS,
                 Duration.ofSeconds(idempotent.lockTimeoutSeconds())
         );
 
+
+
+
+        /*
+         * ШАГ 2: Реакция на дубликат
+         * -------------------------------------------------------------------------------------
+         * Если acquired == false (или null), значит, транзакцию с таким UUID уже кто-то делает
+         * прямо сейчас (IN_PROGRESS) или сделал ранее (COMPLETED).
+         */
         if (Boolean.FALSE.equals(acquired)) {
             String currentState = redisTemplate.opsForValue().get(redisKey);
-            log.warn("Duplicate bank transaction detected! transactionId: {}, currentState: {}. Skipping.",
-                    transactionId, currentState);
+            log.warn("Duplicate bank transaction detected! transactionId: {}, currentState: {}. Skipping.", transactionId, currentState);
             return null;
         }
 
@@ -54,7 +74,13 @@ public class IdempotentAspect {
 
             Object result = joinPoint.proceed();
 
-            // 2. Успех: переводим статус в COMPLETED и задаем долгосрочный TTL
+            /*
+             * ШАГ 3: Успешное финализирование
+             * -------------------------------------------------------------------------------------
+             * Если бизнес-логика выполнилась БЕЗ ошибок:
+             * Меняем статус в Redis с "IN_PROGRESS" на "COMPLETED" и ставим ДОЛГИЙ TTL (например, 24 часа).
+             * Теперь в течение суток любые повторные прилеты этого transactionId будут отсекаться.
+             */
             redisTemplate.opsForValue().set(
                     redisKey,
                     STATE_COMPLETED,
@@ -66,6 +92,15 @@ public class IdempotentAspect {
             return result;
 
         } catch (Throwable throwable) {
+
+            /*
+             * ШАГ 4: Обработка ошибок в бизнес-логике
+             * -------------------------------------------------------------------------------------
+             * Если бизнес-логика упала (вылетело исключение):
+             * Удаляем ключ из Redis!
+             * Зачем? Чтобы освободить транзакцию. Когда сработает механизм Retry или сообщение
+             * переотправится из DLQ, аспект снова пропустит этот transactionId на повторную попытку.
+             */
             redisTemplate.delete(redisKey);
             log.error("Failed to process transactionId: {}. Lock released for Retry/DLQ.", transactionId, throwable);
             throw throwable;

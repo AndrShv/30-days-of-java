@@ -24,10 +24,9 @@ public class TaskRestController {
 
     @PostMapping("/generate")
     public ResponseEntity<String> generateTasks() {
-        // Засылаем 5 задач с разным временем выполнения
         for (int i = 1; i <= 5; i++) {
             String taskId = "TASK-" + i + "-" + UUID.randomUUID().toString().substring(0, 4);
-            int duration = random.nextInt(4) + 2; // от 2 до 5 секунд
+            int duration = random.nextInt(4) + 2;
 
             TaskMessage message = TaskMessage.builder()
                     .taskId(taskId)

@@ -16,6 +16,7 @@ import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
+import java.time.Duration;
 
 @Aspect
 @Component
@@ -27,31 +28,46 @@ public class IdempotentAspect {
     private final StringRedisTemplate redisTemplate;
     private final ExpressionParser parser = new SpelExpressionParser();
 
+    private static final String STATE_IN_PROGRESS = "IN_PROGRESS";
+    private static final String STATE_COMPLETED = "COMPLETED";
+
     @Around("@annotation(idempotent)")
     public Object handleIdempotency(ProceedingJoinPoint joinPoint, Idempotent idempotent) throws Throwable {
-        String keyExpression = idempotent.key();
-        String messageId = parseSpelKey(keyExpression, joinPoint);
+        String transactionId = parseSpelKey(idempotent.key(), joinPoint);
+        String redisKey = "idempotency:bank-tx:" + transactionId;
 
-        String redisKey = "idempotency:event:" + messageId;
-
-        Boolean isFirstTimeProcessed = redisTemplate.opsForValue().setIfAbsent(
+        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
                 redisKey,
-                "PROCESSED",
-                idempotent.expireTime(),
-                idempotent.timeUnit()
+                STATE_IN_PROGRESS,
+                Duration.ofSeconds(idempotent.lockTimeoutSeconds())
         );
 
-        if (Boolean.FALSE.equals(isFirstTimeProcessed)) {
-            log.warn("Duplicate message detected! Skipping processing for messageId: {}", messageId);
+        if (Boolean.FALSE.equals(acquired)) {
+            String currentState = redisTemplate.opsForValue().get(redisKey);
+            log.warn("Duplicate bank transaction detected! transactionId: {}, currentState: {}. Skipping.",
+                    transactionId, currentState);
             return null;
         }
 
         try {
-            log.info("First time processing for messageId: {}. Executing business logic...", messageId);
-            return joinPoint.proceed();
+            log.info("Processing bank transaction: transactionId={}...", transactionId);
+
+            Object result = joinPoint.proceed();
+
+            // 2. Успех: переводим статус в COMPLETED и задаем долгосрочный TTL
+            redisTemplate.opsForValue().set(
+                    redisKey,
+                    STATE_COMPLETED,
+                    idempotent.expireTime(),
+                    idempotent.timeUnit()
+            );
+            log.info("Transaction {} marked as COMPLETED in Redis.", transactionId);
+
+            return result;
+
         } catch (Throwable throwable) {
             redisTemplate.delete(redisKey);
-            log.error("Error processing messageId: {}. Redis key released for retry.", messageId, throwable);
+            log.error("Failed to process transactionId: {}. Lock released for Retry/DLQ.", transactionId, throwable);
             throw throwable;
         }
     }

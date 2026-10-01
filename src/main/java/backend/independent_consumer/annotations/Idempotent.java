@@ -13,6 +13,7 @@ import java.util.concurrent.TimeUnit;
 @Order(1)
 public @interface Idempotent {
     String key();
-    long expireTime() default 1;
+    long expireTime() default 24;
     TimeUnit timeUnit() default TimeUnit.HOURS;
+    long lockTimeoutSeconds() default 60;
 }

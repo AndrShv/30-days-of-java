@@ -10,9 +10,10 @@ import java.math.BigDecimal;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-public class OrderCreatedEvent implements Serializable {
-    private String messageId;
-    private String orderId;
-    private String userId;
+public class BankTransactionEvent implements Serializable {
+    private String transactionId;
+    private String accountFrom;
+    private String accountTo;
     private BigDecimal amount;
+    private String currency;
 }

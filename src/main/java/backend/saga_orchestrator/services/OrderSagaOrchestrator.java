@@ -71,32 +71,39 @@ public class OrderSagaOrchestrator {
         return sagaId;
     }
 
-    /**
-     * Логика отката (Компенсирующие транзакции)
-     * Выполняется строго в обратном порядке выполненных шагов!
-     */
+
     private void rollbackSaga(Order order) {
         OrderStatus currentStatus = order.getStatus();
+        // 1. Сначала отменяем ДОСТАВКУ (так как она была забронирована последней)
+        if (currentStatus == OrderStatus.DELIVERY_RESERVED) {
+            updateStatus(order, OrderStatus.CANCELING_DELIVERY); // Переводим статус в CANCELING_DELIVERY
+            try {
+                deliveryService.cancelDelivery(order.getOrderId());
+            } catch (Exception ex) {
+                log.error("💥 Не удалось отменить доставку! Требуется ручное вмешательство.", ex);
+            }
+        }
 
-        // 1. Отмена оплаты (если статус успел дойти до PAYMENT_PROCESSED или выше)
+        // 2. Затем отменяем ОПЛАТУ (если оплата успела пройти)
+        // Обрати внимание: если мы на шаге 1 отменяли доставку, в памяти у объекта order статус поменялся на CANCELING_DELIVERY,
+        // поэтому проверяем и исходный currentStatus, и текущий контекст:
         if (currentStatus == OrderStatus.PAYMENT_PROCESSED || currentStatus == OrderStatus.DELIVERY_RESERVED) {
             updateStatus(order, OrderStatus.CANCELING_PAYMENT);
             try {
                 paymentService.refundPayment(order.getOrderId(), order.getAmount());
             } catch (Exception ex) {
-                log.error("💥 Не удалось отменить оплату! Требуется ручное вмешательство admin.", ex);
+                log.error("💥 Не удалось отменить оплату! Требуется ручное вмешательство.", ex);
             }
         }
 
-        // 2. Отмена/Отклонение заказа
+        // 3. Завершаем откат самого заказа
         updateStatus(order, OrderStatus.CANCELING_ORDER);
         log.warn("🔄 [Order Service COMPENSATE] Статус заказа {} изменен на REJECTED", order.getOrderId());
 
-        // Финальный статус саги после отката
+        // Финальный статус саги после всех откатов
         updateStatus(order, OrderStatus.COMPENSATED);
         log.info("🛡️ [Saga: {}] Компенсирующие транзакции успешно завершены.", order.getSagaId());
     }
-
     private void updateStatus(Order order, OrderStatus newStatus) {
         order.setStatus(newStatus);
         order.setUpdatedAt(LocalDateTime.now());

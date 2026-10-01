@@ -6,7 +6,8 @@ public enum OrderStatus {
     PAYMENT_PROCESSED,
     DELIVERY_RESERVED, // Успешное завершение всей Саги (COMPLETED)
     CANCELING_PAYMENT, // Компенсация оплаты
-    CANCELING_ORDER,   // Компенсация заказа
+    CANCELING_ORDER,    // Компенсация заказа
+    CANCELING_DELIVERY, // Компенсация доставки
     COMPENSATED,       // Успешный откат саги
     FAILED
 }

@@ -14,7 +14,7 @@ public class PayoutEventConsumer {
 
     private final ObjectMapper objectMapper;
 
-    @RabbitListener(queues = "${outbox.rabbitmq.queue.name:payout_outbox_queue}")
+    @RabbitListener(queues = "${luquid.rabbitmq.queue}")
     public void consumePayoutEvent(String messagePayload) {
         try {
             PayoutRequestedEvent event = objectMapper.readValue(messagePayload, PayoutRequestedEvent.class);

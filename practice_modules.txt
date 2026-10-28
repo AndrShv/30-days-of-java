@@ -1,81 +1,127 @@
 ================================================================================
-          ПАТТЕРНЫ И МОДУЛИ ДЛЯ МИКРОСЕРВИСНОЙ АРХИТЕКТУРЫ (SPRING BOOT)
+                 30 DAYS OF JAVA — ПРАКТИЧЕСКИЕ ПРОЕКТЫ
 ================================================================================
 
-1. Модуль «Idempotent Event Consumer» (Spring Boot + RabbitMQ/Kafka + Redis)
+Репозиторий содержит практические приложения на Java 24 и Spring Boot 3.4.1.
+Основные темы: распределённые системы, RabbitMQ, Redis, PostgreSQL, AOP,
+транзакции, надёжность, многопоточность и шаблоны проектирования.
+
+Инфраструктура из docker-compose.yml: PostgreSQL 16, RabbitMQ 3 с Management
+UI и Redis 7.
+
+1. Идемпотентный consumer — backend.independent_consumer
 --------------------------------------------------------------------------------
-Проблема: Сообщение из брокера может прийти дубликатом. Если это списание 
-баланса или создание записи — система продублирует операцию.
-Что пишем:
-- Spring Boot приложение с кастомным @Idempotent аспектным декоратором (AOP).
-- Проверка MessageId через Redis (операция SETNX с TTL).
-- Если обработка упала — отправка сообщения в DLQ (Dead Letter Queue) 
-  с правильной стратегией retries.
+Задача: не допустить повторной обработки банковского события при повторной
+доставке RabbitMQ или retry.
 
+Реализовано:
+- IdempotentConsumerApplication, BankTransactionProducer и Consumer;
+- @Idempotent и IdempotentAspect с @Around advice;
+- вычисление ключа через SpEL;
+- атомарная Redis-блокировка SETNX (setIfAbsent);
+- состояния IN_PROGRESS/COMPLETED и TTL;
+- удаление ключа при ошибке для разрешения повторной попытки;
+- @LogTimer и LoggingAspect для измерения времени вызова.
 
-2. Модуль «Transactional Outbox Pattern» (Spring Boot + PostgreSQL + Kafka)
+HTTP-тестовый endpoint отправляет BankTransactionEvent в RabbitMQ, после чего
+аспект пропускает только первое событие с данным transactionId.
+
+2. Transactional Outbox — backend.transactional_outbox_pattern
 --------------------------------------------------------------------------------
-Проблема: Если сохранить сущность в БД, а потом попытаться отправить событие 
-в Kafka — брокер может быть недоступен. Если сделать наоборот — может упасть 
-БД. Данные рассинхронизируются.
-Что пишем:
-- Сохранение записи и события в таблицу outbox_events в рамках одной единой 
-  транзакции @Transactional.
-- Фоновый воркер (@Scheduled или Scheduled Executor), который вычитывает 
-  необработанные события из таблицы outbox_events и атомарно отправляет их в Kafka.
+Задача: не потерять событие, если PostgreSQL успешно сохранил выплату, но
+RabbitMQ временно недоступен.
 
+PayoutService сохраняет PayoutEntity и OutboxEventEntity со статусом PENDING.
+PayoutEventPublisher с @Scheduled выбирает события, публикует их через
+RabbitTemplate и переводит в PROCESSED либо FAILED. Реализованы репозитории,
+PayoutEventConsumer, статусы outbox, Liquibase master-файл и SQL-миграция.
 
-3. Модуль «Resilience & Rate Limiting Guard» (Spring Boot + Resilience4j + Redis)
+В текущем проекте используется RabbitMQ, а не Kafka.
+
+3. Платежный REST-сервис — backend.liquid_ci_cd_example
 --------------------------------------------------------------------------------
-Проблема: Внешний сторонний API постоянно тормозит или падает, а наш сервис 
-уходит в дедлок из-за зависших потоков.
-Что пишем:
-- Интеграция Resilience4j: паттерны Circuit Breaker (размыкатель цепи при частых 
-  ошибках) и Retry с экспоненциальной задержкой.
-- Реализация RateLimiter на Redis (ограничение 5 запросов в секунду на 
-  пользователя).
+Прикладной пример платежей с асинхронными событиями и автоматическими тестами.
 
+Реализовано:
+- создание, чтение и удаление платежа через REST;
+- PaymentServiceImpl, PaymentRepo, OutboxRepository;
+- Payment и OutboxEventEntity;
+- JSON-сериализация PaymentEvent через Jackson;
+- сохранение outbox-события со статусом PENDING;
+- RabbitMQ PaymentProducer/PaymentConsumer;
+- PaymentNotFoundException;
+- PaymentServiceImplTest и PaymentRestTest.
 
-4. Модуль «Integration Testing & Migrations» (Testcontainers + Liquibase + JUnit 5)
+Проект показывает практическое сочетание REST, JPA, outbox, RabbitMQ и
+тестирования сервисного и web-уровня.
+
+4. Rate Limiter — backend.rate_limiter
 --------------------------------------------------------------------------------
-Проблема: Использование H2 в тестах скрывает специфичные фичи PostgreSQL и 
-некорректно работает с SQL-миграциями.
-Что пишем:
-- Настройка Liquibase скриптов (XML/SQL changelogs) для инициализации БД.
-- Написание интеграционных тестов с помощью Testcontainers, которые при 
-  запуске тестов поднимают реальный контейнер PostgreSQL в Docker.
+Задача: ограничить частоту запросов пользователя и защитить внешний API.
 
+@RateLimit и RateLimiterAspect выполняют проверку до вызова контроллера.
+Пользователь определяется по X-User-Id или IP, счётчик хранится в Redis через
+RedisRateLimiterService, а при превышении лимита выбрасывается
+TooManyRequestsException. PaymentRestController и ExternalApiClientService
+демонстрируют защищённый endpoint и внешний клиент. В pom.xml также подключён
+Resilience4j для retry/circuit breaker-сценариев.
 
-5. Модуль «Competing Consumers / Work Queues» (Spring Boot + RabbitMQ)
+5. Competing Consumers / Work Queue — backend.competing_consumers
 --------------------------------------------------------------------------------
-Проблема: При высокой нагрузке один консьюмер не успевает обрабатывать входящий 
-поток тяжелых задач, из-за чего очередь критически растет.
-Что пишем:
-- Масштабирование консьюмеров с настройкой параллельных потоков (concurrent 
-  consumers) и корректным prefetchCount.
-- Сериализация сообщений в JSON через Jackson2JsonMessageConverter.
-- Балансировка задач между параллельными воркерами с обработкой подтверждений 
-  (ACK/NACK).
+Задача: распределить тяжёлые задачи между несколькими RabbitMQ-worker'ами.
 
+TaskRestController ставит TaskMessage в очередь, а TaskWorker с
+@RabbitListener обрабатывает задачу и пишет в лог worker-поток, taskId и
+длительность. RabbitConfig содержит queue/exchange/binding и JSON-конвертацию.
+Несколько экземпляров приложения могут конкурировать за сообщения и
+масштабировать обработку горизонтально.
 
-6. Модуль «Saga Pattern / Orchestration» (Spring Boot + Camunda / Custom State Machine)
+6. Saga Orchestrator — backend.saga_orchestrator
 --------------------------------------------------------------------------------
-Проблема: В распределенных сервисах нельзя использовать классический ACID 
-@Transactional для распределенных транзакций между разными БД.
-Что пишем:
-- Реализация Saga Orchestrator для распределенных бизнес-процессов (например, 
-  заказ -> оплата -> доставка).
-- Механизм компенсации (Compensating Transactions) для отката выполненных 
-  шагов в случае ошибки на одном из этапов.
+Задача: управлять заказом, оплатой и доставкой без общей распределённой
+ACID-транзакции.
 
+OrderSagaOrchestrator создаёт sagaId и последовательно выполняет шаги:
+создание заказа -> оплата -> резервирование доставки. Order, OrderStatus и
+OrderRepository сохраняют состояние. При ошибке запускаются компенсации:
+отмена доставки, возврат платежа и отмена заказа. Это orchestration-вариант
+Saga с явной машиной статусов и обратными действиями.
 
-7. Модуль «CQRS & Read Database Synchronization» (Spring Boot + PostgreSQL + Elasticsearch/Mongo + Kafka)
+7. Многопоточность и асинхронность — backend.concurrency
 --------------------------------------------------------------------------------
-Проблема: Сложные аналитические и поисковые SQL-запросы замедляют реляционную 
-БД, предназначенную для быстрого OLTP-записи.
-Что пишем:
-- Разделение модели записи (Command - PostgreSQL) и модели чтения (Query - 
-  Elasticsearch/MongoDB/Redis).
-- Настройка асинхронной синхронизации Read-модели через события в Kafka для 
-  быстрого полнотекстового поиска и оптимизированных чтений.
+Набор самостоятельных примеров конкурентного выполнения:
+- ExecutorExample — ExecutorService;
+- FutureHandlingExample — Future;
+- VirtualThreadsExample — 10 000 виртуальных потоков Java 24;
+- FlightBookingSystem — конкурентное бронирование;
+- FraudAndStockCheck — CompletableFuture;
+- FetchUserProfileTask, FetchOrderSummaryTask и FetchBonusPointsTask;
+- ReportAggregator — объединение результатов в UserReport.
+
+Модуль показывает executor'ы, Future, CompletableFuture, virtual threads и
+сценарий fan-out/fan-in.
+
+8. Классические шаблоны — backend.patterns
+--------------------------------------------------------------------------------
+Небольшие примеры GoF без Spring: Singleton, Factory, AbstractFactory,
+Decorator и Strategy. Strategy демонстрирует взаимозаменяемые способы оплаты
+картой и наличными. Код помогает сравнить обычные паттерны с DI/AOP Spring.
+
+9. Spring AOP и порядок аспектов — spring_aop_flow.txt
+--------------------------------------------------------------------------------
+Документ описывает путь события от REST/RabbitMQ до consumer, работу Spring
+AOP proxy, @Around advice, связывание @annotation(idempotent), вычисление SpEL
+ключа, поведение первого сообщения и дубликата, а также порядок аспектов через
+@Order.
+
+10. Сборка и инфраструктура
+--------------------------------------------------------------------------------
+pom.xml подключает Spring Web, JPA, AMQP, Redis, AOP, Resilience4j, Liquibase,
+PostgreSQL, JUnit 5 и Testcontainers. Dockerfile отвечает за контейнеризацию,
+docker-compose.yml — за локальные PostgreSQL/RabbitMQ/Redis, а
+src/main/resources/db/changelog — за миграции.
+
+Примечание: CQRS, Elasticsearch/MongoDB и Kafka в текущем коде отдельными
+модулями не реализованы; фактический обмен сообщениями выполняется через
+RabbitMQ.
 ================================================================================

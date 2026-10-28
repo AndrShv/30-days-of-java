@@ -3,9 +3,9 @@
         xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
-        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.6.xsd">
 
-    <include file="db/changelog/changesets/001-initial-schema.sql"/>
-    <include file="db/changelog/changesets/002-add-indexes.sql"/>
+    <!-- Подключаем файл создания таблиц payments и outbox_events -->
+    <include file="db/changelog/changes/001-initial-schema.sql"/>
 
 </databaseChangeLog>

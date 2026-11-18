@@ -1,4 +1,4 @@
-package backend.algoritms;
+package backend.algorithms;
 
 public class SlidingWindow {
     public static int findPeak(int windowSize, int[] nums){

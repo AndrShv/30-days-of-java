@@ -1,4 +1,4 @@
-package backend.algoritms;
+package backend.algorithms;
 
 import java.util.HashMap;
 
